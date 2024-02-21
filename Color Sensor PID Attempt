@@ -1,0 +1,482 @@
+
+# ME35 color sensing robot
+# Vivian Becker and Jack Goldberg
+
+
+import RPi.GPIO as GPIO
+import time
+
+
+
+
+GPIO.setmode(GPIO.BOARD)
+
+
+# VARIABLES
+
+
+#color path (SET THESE BEFORE START)
+color_path = ['blue','black']
+directions = ['stop']
+
+
+
+curr_path_index = 0
+
+
+
+
+#motor variables
+df_DC = 75 # default duty cycle
+frequency = 100
+
+
+
+cycles = 10
+
+
+# PIN SETUP
+
+
+# SENSOR PINS
+
+
+s2_R = 16
+s3_R = 18
+sig_R = 35  # labeled "out" on the board
+
+
+s2_L = 12
+s3_L = 40
+sig_L = 37
+
+
+GPIO.setup(s2_R, GPIO.OUT)
+GPIO.setup(s3_R, GPIO.OUT)
+GPIO.setup(sig_R, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
+GPIO.setup(s2_L, GPIO.OUT)
+GPIO.setup(s3_L, GPIO.OUT)
+GPIO.setup(sig_L, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
+
+
+# MOTOR PINS
+motorR1 = 38
+motorR2 = 36
+motorL1 = 11 
+motorL2 = 13 
+
+
+GPIO.setup(motorL1, GPIO.OUT)
+GPIO.setup(motorR1, GPIO.OUT)
+GPIO.setup(motorL2, GPIO.OUT)
+GPIO.setup(motorR2, GPIO.OUT)
+
+
+GPIO.output(motorL2, GPIO.LOW)
+GPIO.output(motorR2, GPIO.LOW)
+
+
+pwm_L = GPIO.PWM(motorL1, frequency)  # channel=motorL frequency=50Hz
+pwm_R = GPIO.PWM(motorR1, frequency)  # channel=motorR frequency=50Hz
+
+
+pwm_L.start(0) # Starts the motor duty cycle at 0
+pwm_R.start(0) # Starts the motor duty cycle at 0
+
+
+# COLOR CCALIBRATION (INPUT UP TO DATE CALIBRATION DATA)
+# RIGHT COMES 2ND IN THE ARRAY
+
+
+# Red
+RRMin = [210,97] # min red value for red detection [left value, right value]
+RRMax = [240,102] # max red value for red detection [left value, right value]
+RRAvg = [227,99]
+
+
+RBMin = [125,103]
+RBMax = [153,108]
+RBAvg = [146,105]
+
+
+RGMin = [102,78]
+RGMax = [115,83]
+RGAvg = [110,81]
+
+
+# Green
+GRMin = [125,80]
+GRMax = [157,86]
+GRAvg = [149,83]
+
+
+GBMin = [125,100]
+GBMax = [175,104]
+GBAvg = [167,102]
+
+
+GGMin = [150,90]
+GGMax = [208,96]
+GGAvg = [200,93]
+
+
+
+
+# Blue
+BRMin = [80,40]
+BRMax = [120,83]
+BRAvg = [97,81]
+
+
+BBMin = [240,100]
+BBMax = [310,135]
+BBAvg = [295,132]
+
+
+BGMin = [130,60]
+BGMax = [180,93]
+BGAvg = [156,91]
+
+
+
+
+# BLACK
+BBRMin = [80,74]  # Adjust this threshold
+BBRMax = [90,76]  # Adjust this threshold
+BBRAvg = [84.7,75]
+
+
+BBBMin = [109,96]
+BBBMax = [120,100]
+BBBAvg = [114.5,98]
+
+
+BBGMin = [83,74]
+BBGMax = [95,78]
+BBGAvg = [89.7,76]
+
+
+
+
+# # WHITE
+# PRMin = [150,112]  # Adjust this threshold
+# PRMax = [215,125]  # Adjust this threshold
+# PRAvg = [160,119]
+
+
+# PBMin = [210,150]
+# PBMax = [225,165]
+# PBAvg = [219,159]
+
+
+# PGMin = [145,120]
+# PGMax = [185,130]
+# PGAvg = [172,125]
+
+
+
+
+# Weighted Moving Average
+red_values = [0] * 5
+green_values = [0] * 5
+blue_values = [0] * 5
+
+
+weights = [0.1, 0.15, 0.2, 0.25, 0.3]  # Adjust weights to favor more recent data
+
+
+# function to detect color values and put them in an array
+def DetectColor(s2,s3,sig):
+  
+   # Detect red values
+   GPIO.output(s2, GPIO.LOW)
+   GPIO.output(s3, GPIO.LOW)
+   time.sleep(0.01)
+
+
+   for i in range(5):
+       start_time = time.time()
+       for count in range(cycles):
+           GPIO.wait_for_edge(sig, GPIO.FALLING)
+       duration = time.time() - start_time
+       red_values[i] = cycles / duration * 0.0085 * weights[i]
+
+
+   #take weighted moving average
+   red_avg = sum(red_values) / sum(weights)
+
+
+
+
+   # Detect blue values
+   GPIO.output(s2, GPIO.LOW)
+   GPIO.output(s3, GPIO.HIGH)
+   time.sleep(0.01)
+
+
+   for i in range(5):
+       start_time = time.time()
+       for count in range(cycles):
+           GPIO.wait_for_edge(sig, GPIO.FALLING)
+       duration = time.time() - start_time
+       blue_values[i] = cycles / duration * 0.0085 * weights[i]
+
+
+   blue_avg = sum(blue_values) / sum(weights)
+
+
+
+
+   # Detect green values
+   GPIO.output(s2, GPIO.HIGH)
+   GPIO.output(s3, GPIO.HIGH)
+   time.sleep(0.01)
+
+
+   for i in range(5):
+       start_time = time.time()
+       for count in range(cycles):
+           GPIO.wait_for_edge(sig, GPIO.FALLING)
+       duration = time.time() - start_time
+       green_values[i] = cycles / duration * 0.0085 * weights[i]
+
+
+   green_avg = sum(green_values) / sum(weights)
+
+
+
+
+   return red_avg, green_avg, blue_avg
+
+
+def Error(color_vals,RAvg,BAvg,GAvg,S):
+   errorR = abs(color_vals[0]-RAvg[S])
+   if errorR == 'None':
+            error_R=0
+   return errorR
+#    errorB = abs(color_vals[2]-BAvg[S])
+#    errorG = abs(color_vals[1]-GAvg[S])
+#    error_total=errorR+errorB+errorG
+#    return error_total
+
+
+
+
+# function to determine which color
+def ReadColor(color_vals,N):
+   # print("Weighted Red: ", color_vals[0])
+   # print("Weighted Green: ", color_vals[1])
+   # print("Weighted Blue: ", color_vals[2])
+
+
+    if ((RRMin[N] <= color_vals[0] <= RRMax[N]) and (RBMin[N] <= color_vals[2] <= RBMax[N]) and (RGMin[N] <= color_vals[1] <= RGMax[N])):
+        print('red')
+        return('red')
+    elif ((GRMin[N] <= color_vals[0] <= GRMax[N]) and (GBMin[N] <= color_vals[2] <= GBMax[N]) and (GGMin[N] <= color_vals[1] <= GGMax[N])):
+        print('green')
+        return('green')
+    elif ((BRMin[N] <= color_vals[0] <= BRMax[N]) and (BBMin[N] <= color_vals[2] <= BBMax[N]) and (BGMin[N] <= color_vals[1] <= BGMax[N])):
+        print('blue')
+        return('blue')   
+    elif ((BBRMin[N] <= color_vals[0] <= BBRMax[N]) and (BBBMin[N] <= color_vals[2] <= BBBMax[N]) and (BBGMin[N] <= color_vals[1] <= BBGMax[N])):
+        print('black')
+        return('black')   
+    else:
+        print('white')
+        return('white')
+
+
+
+
+
+sleep=.3
+
+# function to go forward
+def forward(speed):
+    if speed<15:
+        speed=15
+    if speed>35:
+        speed=35
+    pwm_R.ChangeDutyCycle(15)
+    pwm_L.ChangeDutyCycle(15)
+#    pwm_R.ChangeDutyCycle(0)
+#    pwm_L.ChangeDutyCycle(0)
+   #print('forward')
+
+
+
+
+# function to turn right
+def RightTurn(speed):
+    if speed<15:
+        speed=15
+    if speed>35:
+        speed=35
+    pwm_L.ChangeDutyCycle(speed)
+    pwm_R.ChangeDutyCycle(0)
+
+
+
+# function to turn left
+def LeftTurn(speed):
+    if speed<15:
+        speed=15
+    if speed>35:
+        speed=35
+    pwm_R.ChangeDutyCycle(speed)
+    pwm_L.ChangeDutyCycle(0)
+    # time.sleep(sleep)
+    # stop()
+
+
+
+# function to rotate right and switch lines at intersection
+def SwitchToRight():
+   while (curr_color_L != 'white'):
+       RightTurn()
+   while (curr_color_L != color_path[curr_path_index]):
+       RightTurn()
+   while (curr_color_R != 'white'):
+       LeftTurn()
+   while (curr_color_R != color_path[curr_path_index]):
+       LeftTurn()
+   while (curr_color_L != 'white'):
+       RightTurn()
+   pass
+
+
+
+
+# function to rotate left and switch lines at intersection
+def SwitchToLeft():
+   while (curr_color_R != 'white'):
+       LeftTurn()
+   while (curr_color_R != color_path[curr_path_index]):
+       LeftTurn()
+   while (curr_color_L != 'white'):
+       RightTurn()
+   while (curr_color_L != color_path[curr_path_index]):
+       RightTurn()
+   while (curr_color_R != 'white'):
+       LeftTurn()
+   pass
+
+
+# function to stop robot
+def stop():
+   pwm_R.ChangeDutyCycle(0)
+   pwm_L.ChangeDutyCycle(0)
+
+def curr_color_avg(curr_color,color_vals,S):
+  if curr_color == 'blue' or curr_color=='white':
+        return Error(color_vals,BRAvg,BBAvg,BGAvg,S)
+  
+
+
+gain=.08
+prev_error = 0
+speed=20
+try:
+   i=0
+   while True:
+        # detect color values and add them to a temp array
+        color_vals_R = DetectColor(s2_R,s3_R,sig_R)
+        color_vals_L = DetectColor(s2_L,s3_L,sig_L)
+
+        # figure out what color it is
+        print('right:')
+        curr_color_R = ReadColor(color_vals_R,0) #having issues with black and white
+        print('left:')
+        curr_color_L = ReadColor(color_vals_L,1)
+        
+        #get error of each sensor
+        error_L=curr_color_avg(curr_color_L,color_vals_L,1)
+        error_R=curr_color_avg(curr_color_R,color_vals_R,0)
+        print('right error:')
+        print(error_R)
+       
+        
+        total_error=abs(error_R-error_L)
+
+        print('total error:')
+        print(total_error)
+
+
+    #input error function
+        speed=gain*error_R
+        print('speed')
+        print(speed)
+        # left sensor is on the line color, turn left
+
+        print('subtraction')
+        print(total_error-prev_error)
+        
+        # right sensor is on line color, go straight
+        i+=1
+        if i>0:
+            test_val=0
+            if error_R == 0:
+                while error_R == 0:
+                    print("straight")
+                    forward(speed)
+                    color_vals_R = DetectColor(s2_R,s3_R,sig_R)
+                    color_vals_L = DetectColor(s2_L,s3_L,sig_L)
+
+                    # figure out what color it is
+                    curr_color_R = ReadColor(color_vals_R,0) #having issues with black and white
+                    curr_color_L = ReadColor(color_vals_L,1)
+                    
+                    #get error of each sensor
+                    error_L=curr_color_avg(curr_color_L,color_vals_L,1)
+                    error_R=curr_color_avg(curr_color_R,color_vals_R,0)
+                    prev_error=total_error
+                    total_error=abs(error_R-error_L)                
+
+            elif total_error-prev_error <test_val:
+                while total_error-prev_error <test_val:
+                    print("left section")
+                    LeftTurn(speed)
+                    color_vals_R = DetectColor(s2_R,s3_R,sig_R)
+                    color_vals_L = DetectColor(s2_L,s3_L,sig_L)
+
+                    # figure out what color it is
+                    curr_color_R = ReadColor(color_vals_R,0) #having issues with black and white
+                    curr_color_L = ReadColor(color_vals_L,1)
+                    
+                    #get error of each sensor
+                    error_L=curr_color_avg(curr_color_L,color_vals_L,1)
+                    error_R=curr_color_avg(curr_color_R,color_vals_R,0)
+                    prev_error=total_error
+                    total_error=abs(error_R-error_L)
+                    
+
+
+            # neither on color, turn right
+            elif total_error-prev_error >test_val:
+                while total_error-prev_error >test_val:
+                    print("right section")
+                    RightTurn(speed)
+                    color_vals_R = DetectColor(s2_R,s3_R,sig_R)
+                    color_vals_L = DetectColor(s2_L,s3_L,sig_L)
+
+                    # figure out what color it is
+                    curr_color_R = ReadColor(color_vals_R,0) #having issues with black and white
+                    curr_color_L = ReadColor(color_vals_L,1)
+                    
+                    #get error of each sensor
+                    error_L=curr_color_avg(curr_color_L,color_vals_L,1)
+                    error_R=curr_color_avg(curr_color_R,color_vals_R,0)
+                    prev_error=total_error
+                    total_error=abs(error_R-error_L)            
+
+
+
+            
+        # print('prev error:')
+        # print(prev_error)
+        # prev_error=total_error
+
+except KeyboardInterrupt:
+   GPIO.cleanup()
+
+
